@@ -34,6 +34,7 @@ io.on('connection', (socket) => {
     console.log('User connected:', socket.id);
 
     socket.on('join-call', (roomId) => {
+
         if (!rooms[roomId]) {
             rooms[roomId] = [];
         }
@@ -44,17 +45,25 @@ io.on('connection', (socket) => {
 
         socket.join(roomId);
 
-        socket.to(roomId).emit('user-joined', socket.id, rooms[roomId]);
+        // 🔥 FIXED (important)
+        io.in(roomId).emit('user-joined', socket.id, rooms[roomId]);
 
         console.log(`User ${socket.id} joined room ${roomId}`);
     });
 
+    // WebRTC signaling
     socket.on('signal', (toId, message) => {
-        socket.to(toId).emit('signal', socket.id, message);
+        io.to(toId).emit('signal', socket.id, message);
     });
 
+    // Chat (room specific)
     socket.on('chat-message', (message, username) => {
-        socket.broadcast.emit('chat-message', message, username, socket.id);
+        for (const roomId in rooms) {
+            if (rooms[roomId].includes(socket.id)) {
+                io.in(roomId).emit('chat-message', message, username, socket.id);
+                break;
+            }
+        }
     });
 
     socket.on('disconnect', () => {
@@ -62,39 +71,42 @@ io.on('connection', (socket) => {
 
         for (const roomId in rooms) {
             const index = rooms[roomId].indexOf(socket.id);
+
             if (index !== -1) {
                 rooms[roomId].splice(index, 1);
-                socket.to(roomId).emit('user-left', socket.id);
+
+                io.in(roomId).emit('user-left', socket.id);
 
                 if (rooms[roomId].length === 0) {
                     delete rooms[roomId];
                 }
+
                 break;
             }
         }
     });
 });
 
-// ENV variables
+// ENV
 const PORT = process.env.PORT || 8000;
 const MONGO_URI = process.env.MONGO_URI;
 
 // Safety check
 if (!MONGO_URI) {
-    console.error("MONGO_URI not defined in environment variables");
+    console.error("MONGO_URI not defined");
     process.exit(1);
 }
 
-// DB connect + server start
+// DB + server start
 mongoose.connect(MONGO_URI)
     .then(() => {
-        console.log('Connected to MongoDB');
+        console.log('MongoDB Connected');
 
         server.listen(PORT, () => {
             console.log(`Server running on port ${PORT}`);
         });
     })
     .catch((err) => {
-        console.error('MongoDB connection error:', err);
+        console.error('MongoDB error:', err);
         process.exit(1);
     });
